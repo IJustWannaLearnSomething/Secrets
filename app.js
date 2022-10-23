@@ -7,17 +7,33 @@ const mongoose = require("mongoose");
 const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const findOrCreate = require("mongoose-findorcreate");
+// O1.) After installing and requiring mongoose-findorcreate we get an error in vscode
+//     Could not find a declaration file for module 'mongoose-findorcreate'.
+//     'c:/Dev/Secrets/node_modules/mongoose-findorcreate/index.js'
+//     implicitly has an 'any' type. Try `npm i --save-dev @types/mongoose-findorcreate`
+//     if it exists or add a new declaration (.d.ts) file containing `declare module
+//     'mongoose-findorcreate';`
+//     ------------------
+//     To fix this, create a folder "types" in root directory of project, and create
+//     "mongoose-findorcreate" folder inside it. Now add a file index.d.ts with
+//      "declare module "mongoose-findorcreate";" inside it.
 
 const { Schema } = mongoose;
 const app = express();
 
 app.use(express.static("public"));
 app.set("view engine", "ejs");
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// P1.)Set up and configure express-session
+// P2.)Initialize passport
+// P3.)Initialize passport session
 app.use(
   session({
-    secret: "Our little secret.",
+    secret: process.env.SECRET,
     resave: false,
     saveUninitialized: false,
   })
@@ -30,16 +46,56 @@ mongoose.connect(process.env.DATABASE_LINK, { useNewUrlParser: true });
 const userSchema = new Schema({
   username: String,
   password: String,
+  googleId: String,
 });
 
+// P4.)Add passport-local-mongoose as a plugin to userSchema
 userSchema.plugin(passportLocalMongoose);
+// O2.)Add findorcreate as a plugin to userSchema.
+userSchema.plugin(findOrCreate);
 
 const User = mongoose.model("User", userSchema);
 
+// P5.)Create a local strategy to hash and salt passwords
+// P6.)Serialize means to create a cookie.
+// P7.)Deserialize means to "break" the cookie to get the information.
 passport.use(User.createStrategy());
+passport.serializeUser(function (user, cb) {
+  process.nextTick(function () {
+    return cb(null, {
+      id: user.id,
+      username: user.username,
+    });
+  });
+});
+passport.deserializeUser(function (user, cb) {
+  process.nextTick(function () {
+    return cb(null, user);
+  });
+});
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+// O3.)Create a GoogleStrategy which will be used to authenticate user using Google OAUTH 2.0.
+//     The Google authentication strategy authenticates users using a Google account and
+//     OAuth 2.0 tokens. The client ID and secret obtained when creating an application are
+//     supplied as options when creating the strategy. The strategy also requires a verify
+//     callback, which receives the access token and optional refresh token, as well as
+//     profile which contains the authenticated user's Google profile. The verify callback
+//     must call cb providing a user to complete authentication.
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: "http://localhost:3000/auth/google/secrets",
+    },
+    (accessToken, refreshToken, profile, cb) => {
+      console.log(profile);
+      User.findOrCreate({ googleId: profile.id }, (err, user) => {
+        return cb(err, user);
+      });
+    }
+  )
+);
 
 app.get("/", (req, res) => {
   res.render("home");
@@ -53,7 +109,14 @@ app.get("/login", (req, res) => {
   res.render("login");
 });
 
+// P8.) There is a issue, if we logout from "/secrets" and hit back button in browser,
+//     the browser will show us an older/cached version of the secrets page. To not show
+//     that and redirect to login page we wrote the app.set() code.
 app.get("/secrets", (req, res) => {
+  res.set(
+    "Cache-Control",
+    "no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0"
+  );
   if (req.isAuthenticated()) {
     res.render("secrets");
   } else {
@@ -67,11 +130,32 @@ app.get("/logout", (req, res) => {
       res.redirect("/");
     } else {
       console.log(err);
-      res.redirect("/");
     }
   });
 });
 
+// O4.)This opens a popup which will ask user to login through google
+//     Authenticate the user, then fetch "profile" of user
+//     After this, Google will make a get request to the path specified in
+//     Authorized redirect URL field in Google Cloud Dashboard
+app.get(
+  "/auth/google",
+  passport.authenticate("google", { scope: ["profile"] })
+);
+
+// O5.) Google will make GET request to the URL specified in Authorized
+//     redirect URL field. This request will redirect user to login page
+//     if authentication failed OR send to secrets upon success
+app.get(
+  "/auth/google/secrets",
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  (req, res) => {
+    res.redirect("/secrets");
+  }
+);
+
+// P9.)Since, we are registering a new user, as soon as user registers succesfully,
+//     he should be authenticated and sent to "/secrets".
 app.post("/register", (req, res) => {
   User.register(
     { username: req.body.username },
@@ -89,7 +173,14 @@ app.post("/register", (req, res) => {
   );
 });
 
-app.post("/login", (req, res) => {
+// P10.) We FIRST AUTHENTICATE the user then use the req.login
+//    In the course, the passport.authenticate was used inside the req.login() method
+//    which caused a huge security leak - If we logout of authenticated session,
+//    then login again but with wrong pass, we would not redirect to "/secrets"
+//    but if we manually enter "/secrets" in browser the page would load.
+//    THAT WON'T HAPPEN AS WE'VE passed passport.authenticate as a paramenter hence it would
+//    run before req.login()
+app.post("/login", passport.authenticate("local"), (req, res) => {
   const newUser = new User({
     username: req.body.username,
     password: req.body.password,
@@ -97,9 +188,7 @@ app.post("/login", (req, res) => {
 
   req.login(newUser, (err) => {
     if (!err) {
-      passport.authenticate("local")(req, res, () => {
-        res.redirect("/secrets");
-      });
+      res.redirect("/secrets");
     } else {
       console.log(err);
       res.redirect("/register");
