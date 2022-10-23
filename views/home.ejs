@@ -1,15 +1,31 @@
 <%- include('partials/header') %>
 
-
-<div class="jumbotron centered">
-  <div class="container">
+<div class="container place-center">
+  <div class="jumbotron centered">
     <i class="fas fa-key fa-6x"></i>
     <h1 class="display-3">Secrets</h1>
     <p class="lead">Don't keep your secrets, share them anonymously!</p>
-    <hr>
-    <a class="btn btn-light btn-lg" href="/register" role="button">Register</a>
-    <a class="btn btn-dark btn-lg" href="/login" role="button">Login</a>
-
+    <hr />
+    <a
+      type="button"
+      class="btn btn-primary btn-lg btn-block mb-2"
+      href="/secrets"
+      >View Secrets</a
+    >
+    <a
+      class="btn btn-light btn-lg"
+      style="width: 40%"
+      href="/register"
+      role="button"
+      >Register</a
+    >
+    <a
+      class="btn btn-dark btn-lg"
+      style="width: 40%"
+      href="/login"
+      role="button"
+      >Login</a
+    >
   </div>
 </div>
 

@@ -49,6 +49,7 @@ const userSchema = new Schema({
   username: String,
   password: String,
   googleId: String,
+  secret: String,
 });
 
 // P4.)Add passport-local-mongoose as a plugin to userSchema
@@ -93,7 +94,6 @@ passport.use(
       callbackURL: "http://localhost:3000/auth/google/secrets",
     },
     (accessToken, refreshToken, profile, cb) => {
-      console.log(profile);
       User.findOrCreate({ googleId: profile.id }, (err, user) => {
         return cb(err, user);
       });
@@ -117,17 +117,18 @@ app.get("/login", (req, res) => {
 P8.)There is a issue, if we logout from "/secrets" and hit back button in browser,
   the browser will show us an older/cached version of the secrets page. To not show
   that and redirect to login page we wrote the app.set() code.
+
+  Update: Since, secrets page is not a privelaged page anymore, the security functionalities are not
+  needed for this page. The security codes are moved to the GET request for submit page
 */
 app.get("/secrets", (req, res) => {
-  res.set(
-    "Cache-Control",
-    "no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0"
-  );
-  if (req.isAuthenticated()) {
-    res.render("secrets");
-  } else {
-    res.redirect("/login");
-  }
+  User.find({ secret: { $ne: null } }, (err, results) => {
+    if (err) {
+      console.log(err);
+    } else if (results) {
+      res.render("secrets", { usersWithSecret: results });
+    }
+  });
 });
 
 app.get("/logout", (req, res) => {
@@ -138,6 +139,18 @@ app.get("/logout", (req, res) => {
       console.log(err);
     }
   });
+});
+
+app.get("/submit", (req, res) => {
+  res.set(
+    "Cache-Control",
+    "no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0"
+  );
+  if (req.isAuthenticated()) {
+    res.render("submit");
+  } else {
+    res.redirect("/login");
+  }
 });
 
 /*
@@ -160,7 +173,7 @@ app.get(
   "/auth/google/secrets",
   passport.authenticate("google", { failureRedirect: "/login" }),
   (req, res) => {
-    res.redirect("/secrets");
+    res.redirect("/submit");
   }
 );
 
@@ -178,7 +191,7 @@ app.post("/register", (req, res) => {
         res.redirect("/register");
       } else {
         passport.authenticate("local")(req, res, () => {
-          res.redirect("/secrets");
+          res.redirect("/submit");
         });
       }
     }
@@ -202,7 +215,7 @@ app.post("/login", passport.authenticate("local"), (req, res) => {
 
   req.login(newUser, (err) => {
     if (!err) {
-      res.redirect("/secrets");
+      res.redirect("/submit");
     } else {
       console.log(err);
       res.redirect("/register");
@@ -210,6 +223,33 @@ app.post("/login", passport.authenticate("local"), (req, res) => {
   });
 });
 
-app.listen(3000, () => {
+app.post("/submit", (req, res) => {
+  const submittedSecret = req.body.secret;
+  switch (submittedSecret) {
+    case null:
+    case undefined:
+      res.redirect("/secrets");
+      break;
+    default:
+      if (submittedSecret.trim().length > 0) {
+        User.findById(req.user.id, (err, result) => {
+          if (err) {
+            console.log(err);
+          } else if (result) {
+            result.secret = submittedSecret;
+            result.save((err) => {
+              if (err) {
+                console.log(err);
+              }
+            });
+          }
+        });
+      }
+      res.redirect("/secrets");
+      break;
+  }
+});
+
+app.listen(3000 || process.env.PORT, () => {
   console.log("Server started at port 3000.");
 });
