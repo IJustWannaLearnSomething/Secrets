@@ -100,6 +100,7 @@ passport.use(
     }
   )
 );
+app.get("/favicon.ico", (req, res) => res.status(204));
 
 app.get("/", (req, res) => {
   res.render("home");
